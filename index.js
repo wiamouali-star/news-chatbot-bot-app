@@ -44,3 +44,9 @@ server.post('/api/messages', async (req, res) => {
         await bot.run(context);
     });
 });
+
+server.get('/', (req, res, next) => {
+    res.send(200, 'Bot is running');
+    next();
+});
+
