@@ -7,76 +7,77 @@ const memoryStorage = new MemoryStorage();
 const conversationState = new ConversationState(memoryStorage);
 const selectedNewsProperty = conversationState.createProperty('selectedNews');
 
-// Create adapter avec gestion d'erreur améliorée
+// Create adapter avec configuration simplifiée pour développement
 const adapter = new BotFrameworkAdapter({
     appId: process.env.MicrosoftAppId || '',
     appPassword: process.env.MicrosoftAppPassword || ''
 });
 
-// Catch-all for errors amélioré
+// Gestion d'erreur améliorée
 adapter.onTurnError = async (context, error) => {
     console.error(`\n [onTurnError]: ${error}`);
     
     // Envoyer un message d'erreur à l'utilisateur
     await context.sendActivity('Désolé, une erreur technique est survenue. Veuillez réessayer.');
     
-    // Effacer l'état de la conversation pour éviter les boucles d'erreur
-    await conversationState.delete(context);
+    // Effacer l'état de la conversation
+    await conversationState.clear(context);
 };
 
-// Classe du bot - CORRECTION : ActivityHandler importé une seule fois
+// Classe du bot
 class NewsBot extends ActivityHandler {
     constructor() {
         super();
 
-        // Message de bienvenue quand un utilisateur rejoint
+        // Message de bienvenue
         this.onMembersAdded(async (context, next) => {
             const membersAdded = context.activity.membersAdded;
             for (let member of membersAdded) {
                 if (member.id !== context.activity.recipient.id) {
-                    await context.sendActivity({
-                        text: "📰 **Bonjour ! Je suis votre assistant actualités.**\n\nChoisissez une actualité et cliquez sur 'Discuter avec le bot' pour démarrer une conversation contextualisée."
-                    });
+                    await context.sendActivity("📰 **Bonjour ! Je suis votre assistant actualités.** Choisissez une actualité pour démarrer une discussion.");
                 }
             }
             await next();
         });
 
-        // Gestion des événements (quand un article est sélectionné)
+        // Gestion des événements (article sélectionné)
         this.onEvent(async (context, next) => {
-            if (context.activity.name === 'newsSelected' || context.activity.name === 'newsArticleSelected') {
+            console.log('Événement reçu:', context.activity.name);
+            
+            if (context.activity.name === 'newsSelected') {
                 const news = context.activity.value;
+                console.log('Article sélectionné:', news);
                 
-                // Sauvegarder l'article dans l'état de la conversation
+                // Sauvegarder l'article
                 await selectedNewsProperty.set(context, news);
 
-                // Accuser réception et proposer des questions
-                await context.sendActivity({
-                    text: `🎯 **Discussion sur : ${news.title}**\n\n${news.summary || 'Je suis prêt à discuter de cette actualité avec vous.'}\n\n*Que souhaitez-vous savoir sur ce sujet ?*`
-                });
+                // Accuser réception
+                await context.sendActivity(`🎯 **Discussion sur : ${news.title}**`);
+                await context.sendActivity(`📖 ${news.summary || 'Je suis prêt à discuter de cette actualité.'}`);
+                await context.sendActivity("💡 *Que souhaitez-vous savoir sur ce sujet ?*");
             }
             await next();
         });
 
-        // Gestion des messages texte de l'utilisateur
+        // Gestion des messages
         this.onMessage(async (context, next) => {
             const userMessage = context.activity.text;
             const news = await selectedNewsProperty.get(context);
 
+            console.log('Message reçu:', userMessage);
+            console.log('Article en cours:', news);
+
             if (news) {
-                // Réponse contextualisée avec l'article
-                await context.sendActivity({
-                    text: `📖 **À propos de : "${news.title}"**\n\nVous me demandez : "${userMessage}"\n\nJe peux vous aider à analyser cette actualité, résumer les points clés, ou discuter de ses implications.`
-                });
+                // Réponse contextualisée
+                await context.sendActivity(`📖 **À propos de : "${news.title}"**`);
+                await context.sendActivity(`❓ Vous me demandez : "${userMessage}"`);
+                await context.sendActivity("🤔 Je peux vous aider à analyser cette actualité, résumer les points clés, ou discuter de ses implications.");
                 
-                // Ici vous pouvez intégrer Azure OpenAI, Cognitive Services, etc.
-                // Exemple de réponse intelligente basée sur le contenu
+                // Réponse intelligente basée sur le contenu
                 await this.generateContextualResponse(context, userMessage, news);
             } else {
                 // Aucun article sélectionné
-                await context.sendActivity({
-                    text: "👋 Pour commencer, veuillez sélectionner une actualité en cliquant sur le bouton 'Discuter avec le bot' sous un article qui vous intéresse."
-                });
+                await context.sendActivity("👋 Pour commencer, veuillez sélectionner une actualité en cliquant sur 'Discuter avec le bot' sous un article.");
             }
 
             await next();
@@ -85,31 +86,32 @@ class NewsBot extends ActivityHandler {
 
     // Méthode pour générer des réponses contextualisées
     async generateContextualResponse(context, userMessage, news) {
-        // Logique de réponse intelligente basée sur l'article
         const lowerMessage = userMessage.toLowerCase();
         
-        if (lowerMessage.includes('quoi') || lowerMessage.includes('quoi de neuf') || lowerMessage.includes('résume')) {
-            await context.sendActivity(`📋 **Résumé de l'actualité :**\n${news.summary || 'Je me concentre sur : ' + news.title}`);
+        if (lowerMessage.includes('quoi') || lowerMessage.includes('résume') || lowerMessage.includes('explique')) {
+            await context.sendActivity(`📋 **Résumé :** ${news.summary || 'Cette actualité mérite une analyse approfondie.'}`);
         } 
         else if (lowerMessage.includes('pourquoi') || lowerMessage.includes('important')) {
-            await context.sendActivity("🔍 **Analyse :** Cette actualité semble importante car elle touche à des enjeux contemporains. Je peux vous aider à en comprendre les implications.");
+            await context.sendActivity("🔍 **Analyse :** Cette actualité semble importante car elle touche à des enjeux contemporains significatifs.");
         }
         else if (lowerMessage.includes('source') || lowerMessage.includes('lien')) {
-            await context.sendActivity(`🔗 **Source :** Vous pouvez consulter l'article complet ici : ${news.url}`);
+            await context.sendActivity(`🔗 **Source :** ${news.url || 'URL non disponible'}`);
+        }
+        else if (lowerMessage.includes('avis') || lowerMessage.includes('pense')) {
+            await context.sendActivity("💭 **Réflexion :** En tant qu'assistant, je peux vous aider à analyser les différents angles de cette actualité.");
         }
         else {
-            // Réponse par défaut
-            await context.sendActivity("💡 **Piste de réflexion :** Cette question ouvre des perspectives intéressantes sur le sujet. Que pensez-vous des implications de cette actualité ?");
+            await context.sendActivity("💡 **Piste :** Cette question ouvre des perspectives intéressantes. Que souhaitez-vous approfondir ?");
         }
     }
 }
 
 const bot = new NewsBot();
 
-// Create server avec CORS pour le développement
+// Create server
 const server = restify.createServer();
 
-// Middleware CORS pour autoriser les requêtes du frontend
+// Middleware CORS
 server.use(restify.plugins.bodyParser());
 server.use(restify.plugins.queryParser());
 
@@ -123,6 +125,7 @@ server.use((req, res, next) => {
 
 // Route pour les messages Bot Framework
 server.post('/api/messages', async (req, res) => {
+    console.log('Message reçu sur /api/messages');
     await adapter.processActivity(req, res, async (context) => {
         await bot.run(context);
         await conversationState.saveChanges(context, false);
@@ -139,10 +142,10 @@ server.get('/', (req, res, next) => {
     next();
 });
 
-// Route de test des événements
+// Route de test
 server.get('/api/test', (req, res, next) => {
     res.send(200, {
-        message: 'Endpoint de test fonctionnel',
+        message: 'Bot endpoint test réussi',
         version: '1.0'
     });
     next();
