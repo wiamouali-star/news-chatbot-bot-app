@@ -22,8 +22,6 @@ adapter.onTurnError = async (context, error) => {
     await context.sendActivity('Oops! Something went wrong.');
 };
 
-// Create the bot logic
-const { ActivityHandler } = require('botbuilder');
 
 class MyBot extends ActivityHandler {
     constructor() {
