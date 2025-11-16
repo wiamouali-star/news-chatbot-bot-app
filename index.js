@@ -32,9 +32,11 @@ const bot = new MyBot();
 
 // Create server
 let server = restify.createServer();
-server.listen(3978, function () {
-    console.log(`Bot running on port 3978`);
+const port = process.env.PORT || 3978;   // 3978 pour tes tests locaux
+server.listen(port, () => {
+    console.log(`Bot running on port ${port}`);
 });
+
 
 // Listen for incoming requests
 server.post('/api/messages', async (req, res) => {
