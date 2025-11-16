@@ -155,4 +155,5 @@ const port = process.env.PORT || 3978;
 server.listen(port, () => {
     console.log(`🤖 Bot d'actualités démarré sur le port ${port}`);
     console.log(`📍 Health check: http://localhost:${port}/`);
+
 });
