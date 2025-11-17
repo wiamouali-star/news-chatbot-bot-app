@@ -24,8 +24,8 @@ server.opts('/api/messages', (req, res, next) => {
 // Stockage simple en mémoire
 const conversations = new Map();
 
-// Route principale - BOT SANS FRAMEWORK
-server.post('/api/messages', (req, res) => {
+// Route principale - BOT SANS FRAMEWORK (CORRIGÉE)
+server.post('/api/messages', (req, res, next) => {  // ← AJOUT DU "next"
     console.log('📨 Message reçu sur /api/messages');
     console.log('📦 Body:', JSON.stringify(req.body, null, 2));
     
@@ -78,6 +78,8 @@ server.post('/api/messages', (req, res) => {
             text: '❌ Désolé, une erreur est survenue.'
         }]);
     }
+    
+    return next();  // ← IMPORTANT : Appeler next()
 });
 
 // Route santé
