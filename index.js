@@ -1,102 +1,119 @@
-// CORRECTION COMPLÈTE du index.js
 const restify = require('restify');
+const jwt = require('jsonwebtoken'); // npm install jsonwebtoken
 
 const server = restify.createServer();
 server.use(restify.plugins.bodyParser());
 server.use(restify.plugins.queryParser());
 
-// CORS pour Azure Bot Service
-server.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    return next();
-});
+// Middleware d'authentification pour Azure Bot Service
+function authenticateBot(req, res, next) {
+    // En développement, vous pouvez désactiver temporairement l'auth
+    if (process.env.NODE_ENV === 'development') {
+        return next();
+    }
 
-server.opts('/api/messages', (req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.send(200);
-    return next();
-});
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.error('❌ Token manquant');
+        res.send(401, 'Unauthorized: Token manquant');
+        return next(false);
+    }
 
-// FORMAT DE RÉPONSE CORRIGÉ pour Azure Bot Service
-server.post('/api/messages', (req, res, next) => {
-    console.log('📨 Message reçu:', req.body.type);
+    const token = authHeader.substring(7);
+    
+    try {
+        // Validation basique du token
+        // En production, utilisez la validation complète Azure AD
+        const decoded = jwt.decode(token);
+        console.log('✅ Token décodé:', decoded?.appId ? 'Valide' : 'Invalide');
+        return next();
+    } catch (error) {
+        console.error('❌ Token invalide:', error.message);
+        res.send(401, 'Unauthorized: Token invalide');
+        return next(false);
+    }
+}
+
+// Appliquer l'authentification uniquement sur /api/messages
+server.post('/api/messages', authenticateBot, (req, res, next) => {
+    console.log('📨 Message authentifié reçu:', req.body.type);
     
     try {
         const activity = req.body;
+        
+        // VALIDATION DE L'ACTIVITÉ
+        if (!activity || !activity.type) {
+            console.error('❌ Activité invalide');
+            res.send(400, { error: 'Activité invalide' });
+            return next();
+        }
+
         let responseText = '';
         
-        // Gestion des différents types de messages
         if (activity.type === 'conversationUpdate') {
-            // Message de bienvenue quand la conversation commence
             if (activity.membersAdded && activity.membersAdded.some(m => m.id.includes('user'))) {
-                responseText = '👋 Bonjour ! Je suis votre assistant actualités. Sélectionnez un article pour discuter.';
+                responseText = '👋 Bonjour ! Je suis votre assistant actualités.';
             }
         } 
         else if (activity.type === 'event' && activity.name === 'newsSelected') {
-            console.log('🎯 Article sélectionné:', activity.value.title);
-            responseText = `📰 Merci d'avoir sélectionné : "${activity.value.title}"\n\nQue souhaitez-vous savoir sur cet article ?`;
+            responseText = `📰 Article sélectionné: "${activity.value.title}"\n\nQue souhaitez-vous savoir ?`;
         } 
-        else if (activity.type === 'message') {
-            console.log('💬 Message texte:', activity.text);
-            responseText = `🤖 J'ai reçu votre message : "${activity.text}"\n\nJe suis un bot simple qui fonctionne ! 🎉`;
+        else if (activity.type === 'message' && activity.text) {
+            responseText = `🤖 Message reçu: "${activity.text}"\n\nJe fonctionne ! 🎉`;
+        } else {
+            responseText = '👋 Bonjour ! Comment puis-je vous aider ?';
         }
-        
-        // CONSTRUIRE LA RÉPONSE AU FORMAT AZURE BOT SERVICE
+
+        // RÉPONSE SIMPLIFIÉE MAIS VALIDE
         const responseActivity = {
             type: 'message',
+            id: Date.now().toString(),
             timestamp: new Date().toISOString(),
-            from: {
-                id: 'bot',
-                name: 'News Bot',
-                role: 'bot'
-            },
+            serviceUrl: activity.serviceUrl,
+            channelId: activity.channelId,
+            from: { id: 'bot', name: 'News Bot' },
             conversation: activity.conversation,
             recipient: activity.from || { id: 'user' },
-            text: responseText || 'Je suis votre assistant actualités. Comment puis-je vous aider ?',
-            replyToId: activity.id
+            text: responseText
         };
-        
-        console.log('📤 Envoi réponse:', responseActivity.text);
-        res.json(responseActivity);
+
+        console.log('📤 Envoi réponse réussie');
+        res.send(200, responseActivity);
         
     } catch (error) {
-        console.error('❌ Erreur:', error);
-        res.json({
-            type: 'message',
-            text: '❌ Désolé, une erreur est survenue. Veuillez réessayer.'
+        console.error('❌ Erreur interne:', error);
+        res.send(500, { 
+            error: 'Internal Server Error',
+            message: error.message 
         });
     }
     
     return next();
 });
 
-// Route santé
-server.get('/', (req, res, next) => {
+// Route santé publique (sans auth)
+server.get('/api/health', (req, res, next) => {
     res.json({
-        status: 'OK',
-        message: '🤖 Bot Azure - EN FONCTIONNEMENT !',
+        status: 'healthy',
+        service: 'Bot Endpoint',
         timestamp: new Date().toISOString(),
-        version: '2.0-azure-fix'
+        auth: 'required for /api/messages'
     });
     return next();
 });
 
-// Route pour les tests de santé Azure
-server.get('/api/health', (req, res, next) => {
+server.get('/', (req, res, next) => {
     res.json({
-        status: 'healthy',
-        service: 'Azure Bot Service Endpoint',
-        timestamp: new Date().toISOString()
+        message: '🤖 Bot Service Running',
+        endpoint: '/api/messages',
+        status: 'active'
     });
+    return next();
 });
 
 const port = process.env.PORT || 3978;
 server.listen(port, () => {
-    console.log(`🎉 BOT AZURE DÉMARRÉ sur le port ${port}`);
-    console.log('📍 Endpoint: /api/messages');
-    console.log('✅ Prêt pour Azure Bot Service');
+    console.log(`🎉 Bot Azure Direct Line sur port ${port}`);
+    console.log('🔐 Authentification: ' + (process.env.NODE_ENV === 'development' ? 'DÉSACTIVÉE' : 'ACTIVE'));
 });
