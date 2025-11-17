@@ -8,10 +8,12 @@ const conversationState = new ConversationState(memoryStorage);
 const selectedNewsProperty = conversationState.createProperty('selectedNews');
 
 // Create adapter
-const adapter = new BotFrameworkAdapter({
-    appId: process.env.MicrosoftAppId || "fda0ef09-2e42-4693-a294-a5408b847009",
-    appPassword: process.env.MicrosoftAppPassword || ""
-});
+// const adapter = new BotFrameworkAdapter({
+//     appId: process.env.MicrosoftAppId || "fda0ef09-2e42-4693-a294-a5408b847009",
+//     appPassword: process.env.MicrosoftAppPassword || ""
+// });
+
+const adapter = new BotFrameworkAdapter({});
 
 // Gestion d'erreur
 adapter.onTurnError = async (context, error) => {
