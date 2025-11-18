@@ -10,100 +10,113 @@ server.use((req, res, next) => {
     next();
 });
 
-// Stockage en mémoire pour les activités de réponse
 const conversationActivities = new Map();
+const conversationWatermarks = new Map();
 
-// ENDPOINT PRINCIPAL - POST /api/messages
+// ENDPOINT POST - AVEC RÉPONSE IMMÉDIATE
 server.post('/api/messages', (req, res, next) => {
-    console.log('=== DIRECT LINE REQUEST ===');
+    console.log('=== 🟡 POST /api/messages ===');
     console.log('Type:', req.body.type);
     console.log('Text:', req.body.text);
-    console.log('Conversation ID:', req.body.conversation?.id);
     
-    try {
-        const incomingActivity = req.body;
-        const conversationId = incomingActivity.conversation?.id;
-        
-        if (!conversationId) {
-            console.error('❌ Conversation ID manquant');
-            return res.send(400, { error: 'Missing conversation ID' });
-        }
-
-        // Initialiser le stockage pour cette conversation
+    const incomingActivity = req.body;
+    const conversationId = incomingActivity.conversation?.id;
+    
+    if (conversationId) {
+        // Initialiser la conversation
         if (!conversationActivities.has(conversationId)) {
             conversationActivities.set(conversationId, []);
+            conversationWatermarks.set(conversationId, 0);
         }
-
+        
         let responseActivity = null;
-
-        // CRÉER UNE ACTIVITÉ DE RÉPONSE
+        
+        // CRÉER LA RÉPONSE
         if (incomingActivity.type === 'conversationUpdate') {
             responseActivity = createBotActivity(
                 incomingActivity,
-                '👋 Bonjour ! Je suis votre assistant actualités. Sélectionnez un article pour discuter !'
+                '👋 Bonjour ! Test Direct Line RÉUSSI ! Tapez "hello" pour confirmer.'
             );
         }
         else if (incomingActivity.type === 'message' && incomingActivity.text) {
             const responseText = generateBotResponse(incomingActivity.text);
             responseActivity = createBotActivity(incomingActivity, responseText);
         }
-
-        // STOCKER L'ACTIVITÉ DE RÉPONSE
+        
+        // STOCKER LA RÉPONSE
         if (responseActivity) {
             const activities = conversationActivities.get(conversationId);
             activities.push(responseActivity);
-            conversationActivities.set(conversationId, activities);
             
-            console.log('💾 Activité stockée:', responseActivity.text);
+            // INCRÉMENTER LE WATERMARK
+            const currentWatermark = conversationWatermarks.get(conversationId);
+            conversationWatermarks.set(conversationId, currentWatermark + 1);
+            
+            console.log('💾 Activité stockée. Watermark:', conversationWatermarks.get(conversationId));
         }
-
-        // RÉPONDRE AVEC ResourceResponse (comme attendu par Direct Line)
-        const resourceResponse = {
-            id: generateActivityId()
-        };
-        
-        console.log('📤 ResourceResponse envoyé:', resourceResponse.id);
-        res.send(200, resourceResponse);
-        
-    } catch (error) {
-        console.error('❌ Error:', error);
-        res.send(500, { 
-            error: {
-                code: 'ServiceError',
-                message: error.message
-            }
-        });
     }
     
+    // RÉPONSE IMMÉDIATE (Direct Line attend ça)
+    const resourceResponse = { id: 'R_' + Date.now() };
+    console.log('📤 ResourceResponse envoyé');
+    
+    res.send(200, resourceResponse);
     return next();
 });
 
-// ENDPOINT CRITIQUE : RÉCUPÉRATION DES ACTIVITÉS
+// ENDPOINT GET - CRITIQUE
 server.get('/v3/directline/conversations/:conversationId/activities', (req, res, next) => {
     const conversationId = req.params.conversationId;
     const watermark = parseInt(req.query.watermark) || 0;
     
-    console.log('📥 GET Activities - Conversation:', conversationId, 'Watermark:', watermark);
+    console.log('=== 🟢 GET Activities appelé ===');
+    console.log('Conversation:', conversationId);
+    console.log('Watermark demandé:', watermark);
+    console.log('Watermark actuel:', conversationWatermarks.get(conversationId) || 0);
     
     if (!conversationActivities.has(conversationId)) {
         console.log('📭 Aucune activité pour cette conversation');
         return res.send(200, {
             activities: [],
-            watermark: watermark.toString()
+            watermark: '0'
         });
     }
     
     const activities = conversationActivities.get(conversationId);
+    const currentWatermark = conversationWatermarks.get(conversationId);
     const newActivities = activities.slice(watermark);
     
     console.log('📦 Envoi de', newActivities.length, 'nouvelles activités');
     
     const response = {
         activities: newActivities,
-        watermark: activities.length.toString()
+        watermark: currentWatermark.toString()
     };
     
     res.send(200, response);
+    return next();
+});
+
+// NOUVEL ENDPOINT : SIMULER LA RÉCUPÉRATION
+server.get('/api/force-get/:conversationId', (req, res, next) => {
+    const conversationId = req.params.conversationId;
+    
+    console.log('=== 🔵 FORCE GET ===');
+    
+    if (!conversationActivities.has(conversationId)) {
+        return res.json({ error: 'Conversation non trouvée' });
+    }
+    
+    const activities = conversationActivities.get(conversationId);
+    const watermark = conversationWatermarks.get(conversationId);
+    
+    res.json({
+        conversationId: conversationId,
+        activities: activities,
+        watermark: watermark,
+        count: activities.length
+    });
+    
     return next();
 });
 
@@ -111,7 +124,7 @@ server.get('/v3/directline/conversations/:conversationId/activities', (req, res,
 function createBotActivity(incomingActivity, text) {
     return {
         type: 'message',
-        id: generateActivityId(),
+        id: 'A_' + Date.now(),
         timestamp: new Date().toISOString(),
         serviceUrl: incomingActivity.serviceUrl,
         channelId: incomingActivity.channelId,
@@ -123,69 +136,42 @@ function createBotActivity(incomingActivity, text) {
         conversation: incomingActivity.conversation,
         recipient: incomingActivity.from || { id: 'user' },
         text: text,
-        locale: 'fr-FR',
-        replyToId: incomingActivity.id
+        locale: 'fr-FR'
     };
 }
 
 function generateBotResponse(userMessage) {
     const message = userMessage.toLowerCase();
     
-    if (message.includes('bonjour') || message.includes('hello') || message.includes('salut')) {
-        return '👋 Bonjour ! Je suis votre assistant actualités. Tapez "test" pour vérifier que tout fonctionne !';
+    if (message.includes('bonjour') || message.includes('hello')) {
+        return '✅ BONJOUR ! La connexion Direct Line fonctionne ! Vous devriez voir ce message.';
     }
     else if (message.includes('test')) {
-        return '✅ TEST RÉUSSI ! Le bot fonctionne correctement. Vous pouvez maintenant sélectionner des articles.';
-    }
-    else if (message.includes('quoi') || message.includes('qu\'est')) {
-        return '❓ Je suis un assistant spécialisé dans les actualités.';
+        return '🎉 TEST RÉUSSI ! Si vous voyez ce message, Direct Line récupère bien les activités.';
     }
     else {
-        return `🤖 Vous avez dit: "${userMessage}"\n\nTapez "test" pour vérifier la connexion !`;
+        return `🤖 Vous avez dit: "${userMessage}"\n\n✅ Le bot fonctionne, mais Direct Line ne récupère pas les réponses.`;
     }
 }
 
-function generateActivityId() {
-    return 'A_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-}
-
-// Health check
+// Health
 server.get('/api/health', (req, res, next) => {
     res.json({ 
         status: 'healthy', 
-        service: 'Direct Line Bot',
         conversations: conversationActivities.size,
         timestamp: new Date().toISOString()
     });
     return next();
 });
 
-// Route OPTIONS pour CORS
-server.opts('/api/messages', (req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.send(200);
-    return next();
-});
-
-server.opts('/v3/directline/conversations/:conversationId/activities', (req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.send(200);
-    return next();
-});
-
 server.get('/', (req, res, next) => {
     res.json({
-        message: '🤖 Direct Line Bot - SYSTÈME COMPLET',
-        status: 'online',
-        endpoints: {
-            post: '/api/messages',
-            get_activities: '/v3/directline/conversations/:id/activities',
-            health: '/api/health'
-        }
+        message: '🤖 Bot avec système complet',
+        test_urls: [
+            '/api/health',
+            '/v3/directline/conversations/{id}/activities',
+            '/api/force-get/{conversationId}'
+        ]
     });
     return next();
 });
@@ -193,8 +179,9 @@ server.get('/', (req, res, next) => {
 const port = process.env.PORT || 3978;
 server.listen(port, () => {
     console.log('=========================================');
-    console.log('🤖 BOT DIRECT LINE - SYSTÈME COMPLET');
+    console.log('🤖 BOT AVEC SYSTÈME COMPLET');
     console.log('📍 Port:', port);
-    console.log('📍 Stockage activités: ACTIVÉ');
+    console.log('📍 Test GET manuel:');
+    console.log('   https://YOUR-URL/api/force-get/mRMXoZTfRjLXr3S92FJIg-fr');
     console.log('=========================================');
 });
