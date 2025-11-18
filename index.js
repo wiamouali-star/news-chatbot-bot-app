@@ -1,58 +1,8 @@
 const restify = require('restify');
-const jwt = require('jsonwebtoken');
 
 const server = restify.createServer();
 server.use(restify.plugins.bodyParser());
 
-// VOS CREDENTIALS AZURE (remplacez par vos vraies valeurs)
-const MICROSOFT_APP_ID = '46220d8f-be9b-48f9-8542-fbcd3c67d6f4';
-const MICROSOFT_APP_PASSWORD = 'NAJ8Q~IdYC4ctgSAsp2mxhIFXhxnxqM2sny~HcMr'; // Utilisez le password qui expire en 2026
-
-// Middleware d'authentification BOT FRAMEWORK
-function authenticateBotFramework(req, res, next) {
-    const authHeader = req.headers.authorization;
-    
-    console.log('🔐 Authentification Bot Framework');
-    console.log('App ID attendu:', MICROSOFT_APP_ID);
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        console.log('❌ Token manquant - Envoi réponse test');
-        
-        // Pour testing, accepter mais logger
-        const testResponse = {
-            type: 'message',
-            text: '🔐 Mode test - Token manquant. Vérifiez l\'authentification Azure.',
-            from: { id: 'bot' },
-            conversation: { id: 'test' }
-        };
-        
-        // Ne pas bloquer pour testing
-        return next();
-    }
-    
-    const token = authHeader.substring(7);
-    
-    try {
-        // Validation simplifiée du token
-        const decoded = jwt.decode(token);
-        console.log('✅ Token JWT décodé:', decoded?.appid ? 'Valide' : 'AppID manquant');
-        
-        if (decoded && decoded.appid) {
-            console.log('🔍 AppID dans token:', decoded.appid);
-        }
-        
-        return next();
-        
-    } catch (error) {
-        console.log('❌ Erreur validation token:', error.message);
-        
-        // En production, vous devriez rejeter
-        // Pour testing, on continue
-        return next();
-    }
-}
-
-// CORS
 server.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -60,34 +10,101 @@ server.use((req, res, next) => {
     next();
 });
 
-// ENDPOINT PRINCIPAL AVEC AUTH
-server.post('/api/messages', authenticateBotFramework, (req, res, next) => {
-    console.log('=== 🟡 WEB CHAT AZURE ===');
-    console.log('Headers auth:', req.headers.authorization ? 'PRÉSENT' : 'ABSENT');
+// Stockage pour les activités de réponse
+const conversationActivities = new Map();
+
+server.post('/api/messages', (req, res, next) => {
+    console.log('=== 📨 MESSAGE REÇU ===');
     console.log('Type:', req.body.type);
     console.log('Text:', req.body.text);
     console.log('Channel:', req.body.channelId);
     
-    // RÉPONSE DIRECTE
-    const response = {
-        type: 'message',
-        id: 'R_' + Date.now(),
-        timestamp: new Date().toISOString(),
-        serviceUrl: req.body.serviceUrl,
-        channelId: req.body.channelId,
-        from: { 
-            id: 'bot', 
-            name: 'News Bot',
-            role: 'bot'
-        },
-        conversation: req.body.conversation,
-        recipient: req.body.from,
-        text: '🎉 WEB CHAT FONCTIONNE ! Message: ' + (req.body.text || 'Bienvenue !'),
-        locale: 'fr-FR',
-        replyToId: req.body.id
+    const incomingActivity = req.body;
+    const conversationId = incomingActivity.conversation?.id;
+    
+    if (conversationId) {
+        // Initialiser le stockage
+        if (!conversationActivities.has(conversationId)) {
+            conversationActivities.set(conversationId, []);
+        }
+        
+        // CRÉER L'ACTIVITÉ DE RÉPONSE
+        let responseActivity = null;
+        
+        if (incomingActivity.type === 'conversationUpdate') {
+            responseActivity = {
+                type: 'message',
+                id: 'A_' + Date.now(),
+                timestamp: new Date().toISOString(),
+                serviceUrl: incomingActivity.serviceUrl,
+                channelId: incomingActivity.channelId,
+                from: { id: 'bot', name: 'Assistant' },
+                conversation: incomingActivity.conversation,
+                recipient: incomingActivity.from,
+                text: '👋 Bonjour ! Je suis votre assistant. Tapez un message !',
+                locale: 'fr-FR'
+            };
+        }
+        else if (incomingActivity.type === 'message' && incomingActivity.text) {
+            responseActivity = {
+                type: 'message',
+                id: 'A_' + Date.now(),
+                timestamp: new Date().toISOString(),
+                serviceUrl: incomingActivity.serviceUrl,
+                channelId: incomingActivity.channelId,
+                from: { id: 'bot', name: 'Assistant' },
+                conversation: incomingActivity.conversation,
+                recipient: incomingActivity.from,
+                text: `🎉 RÉPONSE: Vous avez dit "${incomingActivity.text}" - Ça fonctionne !`,
+                locale: 'fr-FR',
+                replyToId: incomingActivity.id
+            };
+        }
+        
+        // STOCKER l'activité
+        if (responseActivity) {
+            const activities = conversationActivities.get(conversationId);
+            activities.push(responseActivity);
+            console.log('💾 Activité stockée:', responseActivity.text);
+        }
+    }
+    
+    // ⚠️ IMPORTANT : Répondre avec ResourceResponse, pas l'activité !
+    const resourceResponse = {
+        id: 'R_' + Date.now()  // Juste un ID
     };
     
-    console.log('📤 Réponse envoyée à Azure Bot Service');
+    console.log('📤 ResourceResponse envoyé:', resourceResponse.id);
+    res.send(200, resourceResponse);
+    return next();
+});
+
+// ENDPOINT CRITIQUE : Web Chat récupère les activités ici
+server.get('/v3/directline/conversations/:conversationId/activities', (req, res, next) => {
+    const conversationId = req.params.conversationId;
+    const watermark = parseInt(req.query.watermark) || 0;
+    
+    console.log('=== 🔄 GET ACTIVITIES ===');
+    console.log('Conversation:', conversationId);
+    console.log('Watermark:', watermark);
+    
+    if (!conversationActivities.has(conversationId)) {
+        return res.send(200, {
+            activities: [],
+            watermark: '0'
+        });
+    }
+    
+    const activities = conversationActivities.get(conversationId);
+    const newActivities = activities.slice(watermark);
+    
+    console.log('📦 Envoi de', newActivities.length, 'activités à Web Chat');
+    
+    const response = {
+        activities: newActivities,
+        watermark: activities.length.toString()
+    };
+    
     res.send(200, response);
     return next();
 });
@@ -95,32 +112,17 @@ server.post('/api/messages', authenticateBotFramework, (req, res, next) => {
 // Health check
 server.get('/api/health', (req, res, next) => {
     res.json({ 
-        status: 'healthy 🔐',
-        appId: MICROSOFT_APP_ID,
-        auth: 'Bot Framework',
+        status: 'healthy 🎯',
         timestamp: new Date().toISOString()
     });
-    return next();
-});
-
-// Endpoint de test sans auth
-server.post('/api/test', (req, res, next) => {
-    console.log('=== 🧪 TEST SANS AUTH ===');
-    const response = {
-        type: 'message',
-        text: '✅ Test sans auth fonctionne',
-        from: { id: 'bot' }
-    };
-    res.send(200, response);
     return next();
 });
 
 const port = process.env.PORT || 3978;
 server.listen(port, () => {
     console.log('=========================================');
-    console.log('🤖 BOT AVEC AUTH BOT FRAMEWORK');
+    console.log('🤖 BOT CORRIGÉ - FORMAT AZURE');
     console.log('📍 Port:', port);
-    console.log('📍 App ID:', MICROSOFT_APP_ID);
-    console.log('📍 Prêt pour Azure Bot Service authentifié');
+    console.log('📍 Format: ResourceResponse + ActivitySet');
     console.log('=========================================');
 });
