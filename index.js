@@ -6,7 +6,7 @@ server.use(restify.plugins.bodyParser());
 
 // VOS CREDENTIALS AZURE (remplacez par vos vraies valeurs)
 const MICROSOFT_APP_ID = '46220d8f-be9b-48f9-8542-fbcd3c67d6f4';
-const MICROSOFT_APP_PASSWORD = 'gV4******************'; // Utilisez le password qui expire en 2026
+const MICROSOFT_APP_PASSWORD = 'NAJ8Q~IdYC4ctgSAsp2mxhIFXhxnxqM2sny~HcMr'; // Utilisez le password qui expire en 2026
 
 // Middleware d'authentification BOT FRAMEWORK
 function authenticateBotFramework(req, res, next) {
